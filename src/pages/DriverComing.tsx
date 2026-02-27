@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Plus, MapPin, Edit, Phone, Share, CreditCard, X, MessageCircle } from 'lucide-react';
 import { DraggablePanel } from '../components/DraggablePanel';
@@ -7,15 +7,14 @@ import { MapBackground } from '../components/MapBackground';
 import { MessagePanel } from '../components/MessagePanel';
 import { RatingModal } from '../components/RatingModal';
 import { calculatePriceWithStops, getCarTypePrice } from '../utils/priceCalculation';
-import { getETA } from '../utils/etaCalculation';
 import { firebaseService } from '../services/firebaseService';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { useUserProfile } from '../hooks/useUserProfile';
 import { useFirebaseRide } from '../hooks/useFirebaseRide';
 import { useMessageContext } from '../contexts/MessageContext';
-import { DriverLocation } from '../types';
 import { database } from '../config/firebase';
 import { ref, onValue, off } from 'firebase/database';
+import { listenToOrder, listenToDriverLocation, calculateETA } from '../services/trackingService';
 
 interface DriverComingProps {
   destination: string;
@@ -62,15 +61,14 @@ export const DriverComing: React.FC<DriverComingProps> = ({
 
   const [driverInfo, setDriverInfo] = useState<DriverInfo | null>(null);
   const [rideStatus, setRideStatus] = useState<string>('accepted');
-  const [eta, setEta] = useState('3 mins');
-  const [statusText, setStatusText] = useState('Arriving in 3 mins');
+  const [statusText, setStatusText] = useState('Finding driver...');
   const [showArrivalAlert, setShowArrivalAlert] = useState(false);
   const [hasShownArrivalAlert, setHasShownArrivalAlert] = useState(false);
   const [isMessagePanelOpen, setIsMessagePanelOpen] = useState(false);
   const [isRatingModalOpen, setIsRatingModalOpen] = useState(false);
-  const [driverLocation, setDriverLocation] = useState<DriverLocation | null>(null);
   const [showCancelConfirmation, setShowCancelConfirmation] = useState(false);
   const [foodOrderDetails, setFoodOrderDetails] = useState<any>(null);
+  const stopLocationListenerRef = useRef<(() => void) | null>(null);
 
   const finalDestination = isFood ? orderData.destinationAddress : destination;
   const finalPickup = isFood ? orderData.pickupAddress : pickup;
@@ -81,17 +79,6 @@ export const DriverComing: React.FC<DriverComingProps> = ({
   const priceCalculation = !isFood ? calculatePriceWithStops(pickup, destination, stops) : null;
   const displayPrice = isFood ? finalPrice : (priceCalculation ? getCarTypePrice(priceCalculation.totalPrice, carType) : finalPrice);
 
-  const mockDriverInfo: DriverInfo = {
-    id: 'driver123',
-    name: 'Allen',
-    rating: 4.8,
-    plateNumber: 'KW14CKGP',
-    carModel: 'Silver • Honda Amaze',
-    eta: '3 mins',
-    photo: '👨🏽‍💼',
-    location: { latitude: -26.2041, longitude: 28.0473 }
-  };
-
   // Fetch driver info
   useEffect(() => {
     const fetchDriverInfo = async () => {
@@ -100,100 +87,106 @@ export const DriverComing: React.FC<DriverComingProps> = ({
           const fetchedDriver = await firebaseService.getDriverInfo(currentRide.driverId);
           if (fetchedDriver) {
             setDriverInfo(fetchedDriver);
-            setEta(fetchedDriver.eta || '3 mins');
             return;
           }
         } catch (error) {
           console.error('Error fetching driver info:', error);
         }
       }
-      setDriverInfo(mockDriverInfo);
+
+      const fallbackDriverInfo: DriverInfo = {
+        id: 'driver123',
+        name: 'Allen',
+        rating: 4.8,
+        plateNumber: 'KW14CKGP',
+        carModel: 'Silver • Honda Amaze',
+        eta: '',
+        photo: '👨🏽‍💼',
+        location: { latitude: -26.2041, longitude: 28.0473 }
+      };
+      setDriverInfo(fallbackDriverInfo);
     };
     fetchDriverInfo();
   }, [currentRide]);
 
-  // Listen to food order details if food order
-  useEffect(() => {
-    if (!isFood || !orderId) return;
-
-    const foodOrderRef = ref(database, `foodOrders/${orderId}`);
-    const unsubscribe = onValue(foodOrderRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        setFoodOrderDetails(data);
-      }
-    });
-
-    return () => off(foodOrderRef, 'value', unsubscribe);
-  }, [isFood, orderId]);
-
-  // Listen to ride/food order status
+  // Live order tracking with GPS-based ETA
   useEffect(() => {
     if (!orderId) return;
 
     const collectionName = isFood ? 'foodOrders' : 'rides';
-    const orderRef = ref(database, `${collectionName}/${orderId}`);
 
-    const unsubscribe = onValue(orderRef, (snapshot) => {
-      const data = snapshot.val();
-      if (data) {
-        const newStatus = data.status;
-        setRideStatus(newStatus);
+    const unsubscribeOrder = listenToOrder(orderId, collectionName, (order) => {
+      if (!order) return;
 
-        if (newStatus === 'arrived' && !hasShownArrivalAlert) {
-          setShowArrivalAlert(true);
-          setHasShownArrivalAlert(true);
-          setTimeout(() => setShowArrivalAlert(false), 5000);
-        }
-        if (newStatus === 'completed' || newStatus === 'delivered') {
-          setIsRatingModalOpen(true);
-        }
+      const newStatus = order.status;
+      setRideStatus(newStatus);
 
-        if (isFood && data.driverId && !driverInfo) {
-          firebaseService.getDriverInfo(data.driverId).then((driver) => {
-            if (driver) {
-              setDriverInfo(driver);
-            }
+      if (isFood) {
+        setFoodOrderDetails(order);
+        if (order.driverId && !driverInfo) {
+          firebaseService.getDriverInfo(order.driverId).then((driver) => {
+            if (driver) setDriverInfo(driver);
           });
         }
       }
+
+      if (newStatus === 'arrived' && !hasShownArrivalAlert) {
+        setShowArrivalAlert(true);
+        setHasShownArrivalAlert(true);
+        setTimeout(() => setShowArrivalAlert(false), 5000);
+      }
+
+      if (newStatus === 'completed' || newStatus === 'delivered') {
+        if (stopLocationListenerRef.current) {
+          stopLocationListenerRef.current();
+          stopLocationListenerRef.current = null;
+        }
+        setStatusText("You've arrived at your destination");
+        setTimeout(() => setIsRatingModalOpen(true), 3000);
+        return;
+      }
+
+      if (newStatus === 'accepted' && order.driverId) {
+        if (stopLocationListenerRef.current) {
+          stopLocationListenerRef.current();
+        }
+
+        stopLocationListenerRef.current = listenToDriverLocation(order.driverId, (driverLoc) => {
+          const pickupCoords = order.pickupLocation || { latitude: -26.2041, longitude: 28.0473 };
+          const etaMinutes = calculateETA(driverLoc, pickupCoords);
+          setStatusText(`Arriving in ${etaMinutes} min${etaMinutes !== 1 ? 's' : ''}`);
+        });
+      }
+
+      if (newStatus === 'arrived') {
+        if (stopLocationListenerRef.current) {
+          stopLocationListenerRef.current();
+          stopLocationListenerRef.current = null;
+        }
+        setStatusText('Your driver has arrived');
+      }
+
+      if (newStatus === 'started' && order.driverId) {
+        if (stopLocationListenerRef.current) {
+          stopLocationListenerRef.current();
+        }
+
+        stopLocationListenerRef.current = listenToDriverLocation(order.driverId, (driverLoc) => {
+          const destinationCoords = order.destinationLocation || { latitude: -26.195, longitude: 28.04 };
+          const etaMinutes = calculateETA(driverLoc, destinationCoords);
+          setStatusText(`On trip — ETA ${etaMinutes} min${etaMinutes !== 1 ? 's' : ''}`);
+        });
+      }
     });
 
-    return () => off(orderRef, 'value', unsubscribe);
-  }, [orderId, isFood, hasShownArrivalAlert, driverInfo]);
-
-  // Listen to driver location
-  useEffect(() => {
-    if (!currentRide?.driverId) return;
-
-    const unsubscribeLocation = firebaseService.listenToDriverLocation(
-      currentRide.driverId,
-      (location) => {
-        if (location) {
-          setDriverLocation(location);
-          const pickupLoc = currentRide.pickupLocation || { latitude: -26.2041, longitude: 28.0473 };
-          const destinationLoc = currentRide.destinationLocation || { latitude: -26.195, longitude: 28.04 };
-
-          if (rideStatus === 'accepted') {
-            const calculatedEta = getETA(location.lat, location.lng, pickupLoc.latitude, pickupLoc.longitude);
-            setEta(calculatedEta);
-            setStatusText(`Arriving in ${calculatedEta}`);
-          } else if (rideStatus === 'started') {
-            const calculatedEta = getETA(location.lat, location.lng, destinationLoc.latitude, destinationLoc.longitude);
-            setEta(calculatedEta);
-            setStatusText(`On trip — ETA ${calculatedEta}`);
-          }
-        }
+    return () => {
+      unsubscribeOrder();
+      if (stopLocationListenerRef.current) {
+        stopLocationListenerRef.current();
+        stopLocationListenerRef.current = null;
       }
-    );
-
-    return () => unsubscribeLocation();
-  }, [currentRide, rideStatus]);
-
-  useEffect(() => {
-    if (rideStatus === 'arrived') setStatusText('Your driver has arrived');
-    else if (rideStatus === 'completed') setStatusText("You've arrived at your destination");
-  }, [rideStatus]);
+    };
+  }, [orderId, isFood, hasShownArrivalAlert, driverInfo]);
 
   const handleMessageDriver = async () => {
     setIsMessagePanelOpen(true);
