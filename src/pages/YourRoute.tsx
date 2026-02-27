@@ -112,13 +112,13 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
       newStops[activeField] = address;
       setStops(newStops);
     }
-    
+
     setSearchQuery('');
-    
+
     // Auto-navigate to next empty field or complete the route
     setTimeout(() => {
       const nextField = getNextEmptyField();
-      
+
       if (nextField !== null) {
         // Move to next empty field
         setActiveField(nextField);
@@ -129,8 +129,8 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
         } else {
           setSearchQuery(stops[nextField] || '');
         }
-      } else if (areAllFieldsFilled()) {
-        // All fields filled, navigate to select ride
+      } else if (areAllFieldsFilled() && serviceType === 'ride') {
+        // Only auto-navigate for ride service type
         onRouteComplete?.(pickup, destination, stops);
         navigate('/select-ride');
       }
@@ -192,6 +192,25 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
       default:
         return '';
     }
+  };
+
+  const handleLogisticsNavigate = () => {
+    if (!pickup || !destination || !extraOption) return;
+
+    onRouteComplete?.(pickup, destination, stops);
+    navigate('/select-ride', {
+      state: {
+        serviceType,
+        pickup,
+        destination,
+        stops,
+        extraOption
+      }
+    });
+  };
+
+  const isLogisticsButtonEnabled = (): boolean => {
+    return pickup !== '' && destination !== '' && extraOption !== '';
   };
 
   const renderTowingOptions = () => (
@@ -275,8 +294,14 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
         transition={{ delay: 0.1 }}
       >
         <div className="flex items-center justify-between">
-          <button 
-            onClick={() => navigate('/')}
+          <button
+            onClick={() => {
+              if (serviceType === 'ride') {
+                navigate('/');
+              } else {
+                navigate('/aletwende-send');
+              }
+            }}
             className="w-10 h-10 flex items-center justify-center hover:bg-gray-100 rounded-full transition-colors"
           >
             <X size={24} className="text-gray-800" />
@@ -453,27 +478,15 @@ export const YourRoute: React.FC<YourRouteProps> = ({ onRouteComplete }) => {
             transition={{ delay: 0.3, type: 'spring', damping: 20, stiffness: 300 }}
           >
             <motion.button
-              onClick={() => {
-                if (pickup && destination && extraOption) {
-                  navigate('/select-ride', {
-                    state: {
-                      serviceType,
-                      pickup,
-                      destination,
-                      stops,
-                      extraOption
-                    }
-                  });
-                }
-              }}
-              disabled={!pickup || !destination || !extraOption}
+              onClick={handleLogisticsNavigate}
+              disabled={!isLogisticsButtonEnabled()}
               className={`w-full py-4 px-6 rounded-2xl font-bold text-lg transition-all ${
-                !pickup || !destination || !extraOption
+                !isLogisticsButtonEnabled()
                   ? 'bg-gray-300 text-gray-500 cursor-not-allowed'
                   : 'bg-gradient-to-r from-green-500 to-green-600 text-white shadow-lg hover:shadow-xl'
               }`}
-              whileTap={!pickup || !destination || !extraOption ? {} : { scale: 0.98 }}
-              whileHover={!pickup || !destination || !extraOption ? {} : { y: -2 }}
+              whileTap={!isLogisticsButtonEnabled() ? {} : { scale: 0.98 }}
+              whileHover={!isLogisticsButtonEnabled() ? {} : { y: -2 }}
             >
               {getButtonLabel()}
             </motion.button>
