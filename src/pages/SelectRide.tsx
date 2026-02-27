@@ -1,9 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { motion, AnimatePresence, PanInfo } from 'framer-motion';
-import { X, Plus, Calendar, Users, ArrowRight, ChevronDown } from 'lucide-react';
+import { X, Plus, Calendar, Users, User, Briefcase, ChevronDown } from 'lucide-react';
 import { MapBackground } from '../components/MapBackground';
-import { BottomNavigation } from '../components/BottomNavigation';
 import { PromoDetailsPanel } from '../components/PromoDetailsPanel';
 import { carTypes } from '../data/mockData';
 import { calculatePriceWithStops, getCarTypePrice } from '../utils/priceCalculation';
@@ -48,6 +47,7 @@ export const SelectRide: React.FC<SelectRideProps> = ({
   const [showPromoDetails, setShowPromoDetails] = useState(false);
   const [selectedFilter, setSelectedFilter] = useState<FilterTab>('recommended');
   const [panelHeight, setPanelHeight] = useState(PANEL_MIN_HEIGHT);
+  const [profileToggle, setProfileToggle] = useState<'personal' | 'business'>('personal');
 
   const isExpanded = panelHeight > SNAP_THRESHOLD;
 
@@ -355,6 +355,40 @@ export const SelectRide: React.FC<SelectRideProps> = ({
 
         <div className="flex-shrink-0 bg-white border-t border-gray-200 px-4 py-3">
           <div className="flex items-center gap-2 mb-3">
+            <div className="relative bg-gray-100 rounded-full p-1 flex items-center flex-shrink-0">
+              <motion.div
+                className="absolute top-1 bottom-1 left-1 bg-white rounded-full shadow-md"
+                animate={{
+                  width: 40,
+                  x: profileToggle === 'personal' ? 0 : 40
+                }}
+                transition={{ type: 'spring', damping: 20, stiffness: 300 }}
+              />
+              <button
+                onClick={() => setProfileToggle('personal')}
+                className="relative z-10 w-10 h-10 flex items-center justify-center"
+              >
+                <User size={18} className={profileToggle === 'personal' ? 'text-gray-900' : 'text-gray-400'} />
+              </button>
+              <button
+                onClick={() => setProfileToggle('business')}
+                className="relative z-10 w-10 h-10 flex items-center justify-center"
+              >
+                <Briefcase size={18} className={profileToggle === 'business' ? 'text-gray-900' : 'text-gray-400'} />
+              </button>
+            </div>
+
+            <motion.button
+              onClick={() => console.log('Cash payment clicked')}
+              className="py-2 px-3 bg-white border border-gray-300 rounded-lg font-medium text-gray-900 hover:bg-gray-50 transition-colors flex items-center justify-center gap-1 flex-shrink-0 text-sm"
+              whileTap={{ scale: 0.95 }}
+            >
+              Cash
+              <ChevronDown size={14} />
+            </motion.button>
+
+            <div className="flex-1" />
+
             <motion.button
               onClick={() => navigate('/schedule-ride')}
               className="w-12 h-12 bg-green-600 text-white rounded-2xl flex items-center justify-center hover:bg-green-700 transition-colors shadow-lg flex-shrink-0"
@@ -362,8 +396,6 @@ export const SelectRide: React.FC<SelectRideProps> = ({
             >
               <Calendar size={20} />
             </motion.button>
-
-            <div className="flex-1" />
           </div>
 
           <motion.button
@@ -397,8 +429,6 @@ export const SelectRide: React.FC<SelectRideProps> = ({
         onClose={() => setShowPromoDetails(false)}
         promo={promo}
       />
-
-      <BottomNavigation activeTab="home" />
     </div>
   );
 };
