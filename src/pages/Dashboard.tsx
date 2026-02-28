@@ -114,7 +114,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ onSearchSelect }) => {
         </motion.div>
       )}
 
-      <DraggablePanel initialHeight={450} maxHeight={600} minHeight={170}>
+      <DraggablePanel initialHeight={450} maxHeight={600} minHeight={175}>
         <div className="space-y-6">
           {/* Let's go places header */}
           <motion.h1 
