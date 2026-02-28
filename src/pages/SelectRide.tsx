@@ -460,7 +460,21 @@ export const SelectRide: React.FC<SelectRideProps> = ({
                 alert('You already have an active ride.');
                 return;
               }
-              onSelectRide(selectedCar.name, selectedCar.price);
+
+              if (serviceType === 'ride') {
+                onSelectRide(selectedCar.name, selectedCar.price);
+              } else {
+                navigate('/confirm-order', {
+                  state: {
+                    serviceType,
+                    vehicle: selectedCar,
+                    extraSelection: extraOption,
+                    pickupAddress: pickup,
+                    destinationAddress: destination,
+                    stops
+                  }
+                });
+              }
             }}
             disabled={isRideActive}
             className={`w-full py-3 rounded-2xl font-bold text-base transition-colors shadow-lg ${

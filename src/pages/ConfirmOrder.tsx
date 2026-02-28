@@ -7,7 +7,7 @@ import { useUserProfile } from '../hooks/useUserProfile';
 import { calculatePriceWithStops, getCarTypePrice } from '../utils/priceCalculation';
 import { useRideContext } from '../contexts/RideContext';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { database } from '../config/firebase';
+import { database, auth } from '../config/firebase';
 import { ref, push, set } from 'firebase/database';
 
 interface ConfirmOrderProps {
@@ -38,7 +38,15 @@ export const ConfirmOrder: React.FC<ConfirmOrderProps> = ({
   const { createRide } = useFirebaseRide();
   const { isRideActive } = useRideContext();
 
-  const { orderType = 'ride', orderData = {} } = location.state || {};
+  const {
+    orderType = 'ride',
+    orderData = {},
+    serviceType,
+    vehicle,
+    extraSelection,
+    pickupAddress,
+    destinationAddress
+  } = location.state || {};
 
   const isFood = orderType === 'food';
 
@@ -51,6 +59,74 @@ export const ConfirmOrder: React.FC<ConfirmOrderProps> = ({
   const priceCalculation = !isFood ? calculatePriceWithStops(pickup, destination, stops) : null;
   const displayPrice = isFood ? finalPrice : (priceCalculation ? getCarTypePrice(priceCalculation.totalPrice, carType) : finalPrice);
 
+  const isService = serviceType && serviceType !== 'ride';
+
+  const getServiceLabel = () => {
+    if (serviceType === 'package') return 'Package Delivery';
+    if (serviceType === 'towing') return 'Towing Service';
+    if (serviceType === 'truck') return 'Truck Service';
+    return '';
+  };
+
+  const getExtraSelectionLabel = () => {
+    if (serviceType === 'package') return 'Weight';
+    if (serviceType === 'towing') return 'Vehicle Type';
+    if (serviceType === 'truck') return 'Cargo Type';
+    return '';
+  };
+
+  const buildServiceRequest = () => {
+    const currentUser = auth.currentUser;
+    if (!currentUser) {
+      throw new Error('User must be authenticated to request a service');
+    }
+
+    return {
+      type: serviceType,
+      vehicleClass: vehicle?.name || '',
+      serviceMeta: {
+        [getExtraSelectionLabel().toLowerCase().replace(' ', '_')]: extraSelection || ''
+      },
+      pickupAddress: pickupAddress || '',
+      destinationAddress: destinationAddress || '',
+      stops: stops || [],
+      status: 'pending',
+      timestamp: Date.now(),
+      userId: currentUser.uid,
+      userName: currentUser.displayName || profile?.name || 'Unknown User',
+      userEmail: currentUser.email || profile?.email || '',
+      pricing: {
+        basePrice: vehicle?.price || 0,
+        currency: 'ZAR'
+      }
+    };
+  };
+
+  const confirmServiceRequest = async () => {
+    try {
+      const serviceRequest = buildServiceRequest();
+      const serviceRequestsRef = ref(database, 'serviceRequests');
+      const newServiceRequestRef = push(serviceRequestsRef);
+      const serviceRequestId = newServiceRequestRef.key!;
+
+      await set(newServiceRequestRef, serviceRequest);
+
+      localStorage.setItem('currentServiceRequestId', serviceRequestId);
+      localStorage.setItem('currentOrderType', 'service');
+
+      navigate('/waiting-for-driver', {
+        state: {
+          orderType: 'service',
+          requestId: serviceRequestId,
+          orderData: serviceRequest
+        }
+      });
+    } catch (error) {
+      console.error('Failed to create service request:', error);
+      throw error;
+    }
+  };
+
   const handleConfirmOrder = async () => {
     if (isLoading || isRideActive) {
       if (isRideActive) {
@@ -62,7 +138,9 @@ export const ConfirmOrder: React.FC<ConfirmOrderProps> = ({
     setIsLoading(true);
 
     try {
-      if (isFood) {
+      if (isService) {
+        await confirmServiceRequest();
+      } else if (isFood) {
         const foodOrder = {
           type: 'food',
           deliveryMode: orderData.deliveryMode,
@@ -171,7 +249,45 @@ export const ConfirmOrder: React.FC<ConfirmOrderProps> = ({
         transition={{ type: "spring", damping: 25, stiffness: 200, delay: 0.2 }}
       >
         <div className="space-y-6">
-          {isFood ? (
+          {isService ? (
+            <>
+              <div className="text-center">
+                <h2 className="text-2xl font-bold text-gray-900 mb-2">{getServiceLabel()}</h2>
+                <p className="text-gray-600">{vehicle?.description}</p>
+                <p className="text-sm text-gray-500">{vehicle?.eta}</p>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-4">
+                <h3 className="font-semibold text-gray-900 mb-3">Service Details</h3>
+                <div className="space-y-2 text-sm">
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Pickup:</span>
+                    <span className="text-gray-900 font-medium">{pickupAddress}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Destination:</span>
+                    <span className="text-gray-900 font-medium">{destinationAddress}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">Vehicle:</span>
+                    <span className="text-gray-900 font-medium">{vehicle?.name}</span>
+                  </div>
+                  <div className="flex justify-between">
+                    <span className="text-gray-600">{getExtraSelectionLabel()}:</span>
+                    <span className="text-gray-900 font-medium">{extraSelection}</span>
+                  </div>
+                </div>
+              </div>
+
+              <div className="bg-gray-50 rounded-xl p-4 space-y-2">
+                <h3 className="font-semibold text-gray-900 mb-3">Pricing</h3>
+                <div className="flex justify-between pt-2 border-t border-gray-200">
+                  <span className="font-semibold text-gray-900">Total</span>
+                  <span className="text-lg font-bold text-gray-900">R {vehicle?.price || 0}</span>
+                </div>
+              </div>
+            </>
+          ) : isFood ? (
             <>
               <div className="text-center">
                 <h2 className="text-2xl font-bold text-gray-900 mb-2">{orderData.deliveryMode?.label}</h2>
