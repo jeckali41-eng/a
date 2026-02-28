@@ -45,17 +45,18 @@ export const WaitingForDriver: React.FC<WaitingForDriverProps> = ({
 
   const { orderType = 'ride', requestId, orderData = {} } = location.state || {};
   const isFood = orderType === 'food';
-  const collectionName = isFood ? 'foodOrders' : 'rideRequests';
+  const isService = orderType === 'service';
+  const collectionName = isService ? 'serviceRequests' : (isFood ? 'foodOrders' : 'rides');
   const orderId = requestId || currentRideId;
 
-  const finalDestination = isFood ? orderData.destinationAddress : destination;
-  const finalPickup = isFood ? orderData.pickupAddress : pickup;
-  const finalStops = isFood ? (orderData.stops || []) : stops;
-  const finalCarType = isFood ? orderData.deliveryMode?.label : carType;
-  const finalPrice = isFood ? orderData.totalPrice : price;
+  const finalDestination = isService ? orderData.destinationAddress : (isFood ? orderData.destinationAddress : destination);
+  const finalPickup = isService ? orderData.pickupAddress : (isFood ? orderData.pickupAddress : pickup);
+  const finalStops = isService ? (orderData.stops || []) : (isFood ? (orderData.stops || []) : stops);
+  const finalCarType = isService ? orderData.vehicleClass : (isFood ? orderData.deliveryMode?.label : carType);
+  const finalPrice = isService ? orderData.pricing?.basePrice : (isFood ? orderData.totalPrice : price);
 
-  const priceCalculation = !isFood ? calculatePriceWithStops(pickup, destination, stops) : null;
-  const displayPrice = isFood ? finalPrice : (priceCalculation ? getCarTypePrice(priceCalculation.totalPrice, carType) : finalPrice);
+  const priceCalculation = !isFood && !isService ? calculatePriceWithStops(pickup, destination, stops) : null;
+  const displayPrice = isService || isFood ? finalPrice : (priceCalculation ? getCarTypePrice(priceCalculation.totalPrice, carType) : finalPrice);
 
   useEffect(() => {
     if (!isScanning) return;
@@ -132,7 +133,10 @@ export const WaitingForDriver: React.FC<WaitingForDriverProps> = ({
 
   const handleConfirmCancel = async () => {
     try {
-      if (isFood) {
+      if (isService) {
+        localStorage.removeItem('currentServiceRequestId');
+        localStorage.removeItem('currentOrderType');
+      } else if (isFood) {
         localStorage.removeItem('currentFoodOrderId');
         localStorage.removeItem('currentOrderType');
       } else {
@@ -168,7 +172,7 @@ export const WaitingForDriver: React.FC<WaitingForDriverProps> = ({
           >
             Cancel
           </button>
-          <h2 className="text-gray-800 font-bold">Finding {isFood ? 'delivery driver' : 'driver'}</h2>
+          <h2 className="text-gray-800 font-bold">Finding {isService ? 'service provider' : (isFood ? 'delivery driver' : 'driver')}</h2>
           <div className="w-8" />
         </div>
       </motion.div>
